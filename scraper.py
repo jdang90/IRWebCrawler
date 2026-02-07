@@ -821,7 +821,7 @@ def is_valid(url: str):
                 'auth',         # Authorization parameter
                 'timestamp',    # Time-based tracking
                 'replytocom',   # WordPress comment reply tracking
-                'ical', 'outlook-ical', 'ics', 'gcal'
+                'ical', 'outlook-ical', 'ics', 'gcal', 'uid', 'startdt', 'enddt', 'path'
             ]
 
             for param in query_params.keys():
@@ -894,6 +894,10 @@ def is_valid(url: str):
         # Examples: ?action=delete, ?action=submit. Create infinite variations of same page,
         # might trigger unintended server actions, usually return error/confirmation pages.
         if parsed.query and 'action=' in parsed.query.lower():
+            return False
+        
+        # New addition to catch Outlook/ICS feeds
+        if re.search(r"/(calendar|events?|archive|day|month|year|ical|outlook)", path_lower):
             return False
 
         #A safeguard to make sure there are no fragments.
