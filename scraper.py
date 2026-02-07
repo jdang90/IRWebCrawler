@@ -758,9 +758,12 @@ def is_valid(url: str):
         # parsed.path.lower() converts to lowercase for case-insensitive matching
         # (so "file.PDF" matches same as "file.pdf")
             return False
-    
+
+        #Checks both the path and query string for calendar indicators
+        full_url_lower = (parsed.path + "?" + parsed.query).lower()
+
         #Trap Detection #1 for Infinite Loop Calendar Pages
-        if re.search(r"/(calendar|events?|archive)/", parsed.path.lower()):
+        if re.search(r"/(calendar|events?|archive|day|month|year)", full_url_lower):
             return False
         
 
@@ -817,7 +820,8 @@ def is_valid(url: str):
                 'token',        # Authentication token
                 'auth',         # Authorization parameter
                 'timestamp',    # Time-based tracking
-                'replytocom'    # WordPress comment reply tracking
+                'replytocom',   # WordPress comment reply tracking
+                'ical', 'outlook-ical', 'ics', 'gcal'
             ]
 
             for param in query_params.keys():
