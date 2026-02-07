@@ -89,6 +89,33 @@ word_freq = {}
 #
 longest_page = ("", 0)   # (url, word_count)
 
+# unique_pages: Set of all unique URLs crawled (defragmented, normalized).
+# ============================================================================
+# Purpose: Track which URLs have been seen to answer "How many unique pages?"
+# We store defragmented URLs (no #fragments) because fragments don't change content.
+# Example: https://ics.uci.edu/page#section1 and https://ics.uci.edu/page#section2
+#   are the SAME page (same URL without fragments).
+# After crawling: unique_pages = {"http://ics.uci.edu/page", "http://ics.uci.edu/faculty", ...}
+#
+unique_pages = set()
+
+# pages_by_subdomain: Dictionary tracking unique page counts per subdomain.
+# ============================================================================
+# Format: {subdomain: count} where subdomain = "ics.uci.edu", "cs.uci.edu", etc.
+# Purpose: Answer "How many subdomains found?" and "How many pages per subdomain?"
+# Example: {"ics.uci.edu": 245, "cs.uci.edu": 189, "stat.uci.edu": 52, ...}
+# Helps identify which subdomain has most content and distribution of crawling.
+#
+pages_by_subdomain = {}
+
+# url_inventory: List of (url, token_count) tuples for all crawled pages.
+# ============================================================================
+# Purpose: Support sorting/ranking pages by content size for report generation.
+# After crawling: url_inventory = [(url1, 5000), (url2, 3200), (url3, 100), ...]
+# Used to find: longest page, average page size, distribution of content.
+#
+url_inventory = []
+
 ###############################################################################
 # HELPER FUNCTIONS
 ###############################################################################
@@ -194,6 +221,146 @@ def extract_visible_text(soup: BeautifulSoup):
 
 
 ###############################################################################
+# REPORTING & ANALYSIS FUNCTIONS
+# These functions support generating the final project report.
+###############################################################################
+
+def get_subdomain(url: str):
+    """
+    EXTRACT SUBDOMAIN FROM URL
+    
+    Purpose: Identify which UCI subdomain a URL belongs to for categorization.
+    
+    Process:
+    1. Parse URL to extract hostname (e.g., "faculty.ics.uci.edu")
+    2. Check which allowed domain it ends with (ics, cs, informatics, stat)
+    3. Return the full subdomain (everything down to and including .uci.edu)
+    
+    Examples:
+    - "http://ics.uci.edu/faculty" → "ics.uci.edu"
+    - "http://faculty.ics.uci.edu/page" → "ics.uci.edu" (main domain of subdomain)
+    - "http://cs.uci.edu/research" → "cs.uci.edu"
+    - "http://vision.ics.uci.edu/project" → "ics.uci.edu" (main domain)
+    
+    Note: We normalize to the main domain (ics.uci.edu) rather than
+    distinguishing vision.ics.uci.edu vs faculty.ics.uci.edu, for simplicity.
+    
+    Args:
+        url (str): Full URL
+    
+    Returns:
+        str: Subdomain (e.g., "ics.uci.edu") or "" if parsing fails
+    """
+    try:
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        # Return the main domain (ics, cs, informatics, or stat + .uci.edu)
+        for allowed in [".ics.uci.edu", ".cs.uci.edu", ".informatics.uci.edu", ".stat.uci.edu"]:
+            if hostname.endswith(allowed):
+                return allowed[1:]  # Remove leading dot
+        return ""
+    except Exception:
+        return ""
+
+
+def report_unique_pages():
+    """
+    REPORT: Total unique pages crawled.
+    
+    Returns: Integer count of unique defragmented URLs in unique_pages set.
+    """
+    return len(unique_pages)
+
+
+def report_longest_page():
+    """
+    REPORT: Longest page by token count.
+    
+    Returns: (url, word_count) tuple for the page with most non-stopword tokens.
+    """
+    return longest_page
+
+
+def report_top_50_words():
+    """
+    REPORT: 50 most common words (by frequency).
+    
+    Process:
+    1. Sort word_freq dictionary by count (descending)
+    2. Take top 50 entries
+    3. Return as list of (word, count) tuples ordered by frequency
+    
+    Returns:
+        list of (word, count) tuples, sorted by frequency descending.
+        Example: [("research", 542), ("machine", 450), ("learning", 389), ...]
+    """
+    sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
+    return sorted_words[:50]
+
+
+def report_subdomains():
+    """
+    REPORT: All subdomains found and page counts per subdomain.
+    
+    Process:
+    1. Take pages_by_subdomain dictionary
+    2. Sort by subdomain name (alphabetically)
+    3. Return as list of (subdomain, count) tuples
+    
+    Returns:
+        list of (subdomain, page_count) tuples, sorted alphabetically by subdomain.
+        Example: [("cs.uci.edu", 189), ("ics.uci.edu", 245), ("stat.uci.edu", 52), ...]
+    """
+    sorted_subdomains = sorted(pages_by_subdomain.items(), key=lambda x: x[0])
+    return sorted_subdomains
+
+
+def is_low_information_page(token_count: int):
+    """
+    TRAP DETECTION: Identify pages with very little textual content.
+    
+    Purpose: Avoid crawling "similar pages with no information" trap.
+    Some websites generate many pages with minimal/identical content
+    (e.g., placeholder pages, auto-generated pages, or pages in a trap pattern).
+    
+    Heuristic: If a page has <10 meaningful tokens (non-stopwords),
+    it's likely low-value and part of a trap. Skip links from such pages.
+    
+    Args:
+        token_count (int): Number of non-stopword tokens on page
+    
+    Returns:
+        bool: True if page is low-information (skip it), False if OK
+    """
+    return token_count < 10
+
+
+def is_dead_200(token_count: int, content_length: int = 0):
+    """
+    TRAP DETECTION: Identify dead 200 responses (status 200 but no real content).
+    
+    Purpose: Some websites return HTTP 200 (success) but serve empty/redirect pages.
+    These "dead 200s" waste crawler resources and should be skipped.
+    
+    Heuristics:
+    - If 0 tokens extracted → likely empty or redirect page (dead 200)
+    - If Content-Length exists and is <50 bytes → likely not real content
+    
+    Args:
+        token_count (int): Number of non-stopword tokens extracted
+        content_length (int): HTTP Content-Length header value (if available)
+    
+    Returns:
+        bool: True if dead 200 detected (skip it), False if seems OK
+    """
+    if token_count == 0:
+        return True  # No content extracted → dead 200
+    if content_length > 0 and content_length < 50:
+        return True  # Extremely small → likely not real content
+    return False
+
+
+###############################################################################
 # MAIN SCRAPER FUNCTION - Core entry point called by crawler framework.
 # ============================================================================
 # This function processes ONE downloaded page and returns valid outgoing links.
@@ -273,7 +440,7 @@ def scraper(url, resp):
     # Declare 'longest_page' as global because we REASSIGN it (not just mutate).
     # Note: word_freq is NOT declared global because we only mutate its contents
     # (word_freq[key] = value), we never reassign word_freq itself.
-    global longest_page
+    global longest_page, unique_pages, pages_by_subdomain, url_inventory
 
     links = []  # Accumulator for valid URLs from this page
 
@@ -338,12 +505,51 @@ def scraper(url, resp):
     # Tokenize: Split text into lowercase words, remove stopwords.
     tokens = tokenize(text)
 
+    # =========================================================================
+    # TRAP DETECTION #1: LOW-INFORMATION PAGES
+    # =========================================================================
+    # If page has very few tokens (<10), it's likely:
+    # - An error/placeholder page with minimal content
+    # - Part of a "similar pages with no information" trap
+    # Skip extracting links from such pages to avoid wasting crawl budget.
+    if is_low_information_page(len(tokens)):
+        return links  # Early exit: low-information page, skip its links
+
+    # =========================================================================
+    # TRAP DETECTION #2: DEAD 200 RESPONSES
+    # =========================================================================
+    # Some pages return 200 OK but have no real content (redirects, empty pages).
+    # Check Content-Length header for extremely small responses.
+    try:
+        cl = resp.raw_response.headers.get("Content-Length")
+        if cl and is_dead_200(len(tokens), int(cl)):
+            return links  # Early exit: dead 200, skip it
+    except Exception:
+        pass
+
     # Update global word frequency statistics.
     # This accumulates term frequencies across all crawled pages.
     # After crawling thousands of pages, we can identify most common topics.
     # Example: word_freq["research"] += 1 for each time "research" appears.
     for tok in tokens:
         word_freq[tok] = word_freq.get(tok, 0) + 1
+
+    # =========================================================================
+    # REPORT GENERATION: TRACK UNIQUE PAGES & SUBDOMAINS
+    # =========================================================================
+    # Add defragmented URL to unique_pages set. Since it's a set,
+    # duplicate URLs are automatically ignored.
+    unique_pages.add(url)
+    
+    # Extract subdomain and increment count for this subdomain.
+    # Example: "http://faculty.ics.uci.edu/page" → subdomain="ics.uci.edu"
+    subdomain = get_subdomain(url)
+    if subdomain:
+        pages_by_subdomain[subdomain] = pages_by_subdomain.get(subdomain, 0) + 1
+    
+    # Store (url, token_count) tuple in inventory for later ranking/sorting.
+    # Useful for finding longest pages, average content size, etc.
+    url_inventory.append((url, len(tokens)))
 
     # Track which page has the most content by token count.
     # Useful for quality assurance: identifies major content hubs.
