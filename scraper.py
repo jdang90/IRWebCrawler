@@ -746,6 +746,16 @@ def is_valid(url: str):
         # =========================================================================
         if parsed.query:
             from urllib.parse import parse_qs
+
+            # Apache directory listing sort params (?C=D;O=A, ?C=S;O=D, etc.)
+            # Apache web servers auto-generate links to re-sort directory listings:
+            #   C=N (sort by Name), C=D (Date), C=M (Modified), C=S (Size)
+            #   O=A (Ascending), O=D (Descending)
+            # These all show the exact same files, just in a different order.
+            # Without this filter, we'd crawl 8 duplicate versions of every directory.
+            if re.match(r'^C=[DNMS];O=[AD]$', parsed.query):
+                return False
+
             query_params = parse_qs(parsed.query)
             
             # TRAP: Session IDs, auth tokens, tracking params
