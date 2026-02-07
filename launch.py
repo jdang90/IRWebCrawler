@@ -1,9 +1,13 @@
 from configparser import ConfigParser
 from argparse import ArgumentParser
 import multiprocessing
+
 # macOS uses 'spawn' by default which can't pickle spacetime's local classes.
 # Must be set before any other multiprocessing usage.
-multiprocessing.set_start_method("fork")
+try:
+    multiprocessing.set_start_method("fork")
+except RuntimeError:
+    pass  # Already set or not supported on this platform
 
 from utils.server_registration import get_cache_server
 from utils.config import Config
