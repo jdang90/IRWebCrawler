@@ -23,8 +23,25 @@ def is_valid(url):
     # There are already some conditions that return False.
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in set(["http", "https"]):
+
+        #This ensures if the URL scheme is http or https
+        if parsed.scheme not in set(["http", "https"]):     
             return False
+        
+        #List of domains allowed according to assignment
+        allowed_domains = [".ics.uci.edu", ".cs.uci.edu", ".informatics.uci.edu", ".stat.uci.edu"]
+
+        #Checks if netloc of URL ends with domain in "allowed_domains" list
+        #OR if it's the domain without the leading dot so like ("ics.uci.edu/home")
+        valid_domain = False
+        for domain in allowed_domains:
+            if parsed.netloc.endswith(domain) or parsed.netloc == domain[1:]:
+                valid_domain = True
+                break
+        
+        if not valid_domain:
+            return False
+
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
