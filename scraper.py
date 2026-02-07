@@ -746,7 +746,7 @@ def is_valid(url: str):
         # Logic: "return not re.match(...)" means:
         # - If pattern MATCHES (found a banned extension) → return False (invalid)
         # - If pattern doesn't match (no banned extension) → return True (valid)
-        return not re.match(
+        if re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
             + r"|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
@@ -754,9 +754,153 @@ def is_valid(url: str):
             + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
             + r"|epub|dll|cnf|tgz|sha1"
             + r"|thmx|mso|arff|rtf|jar|csv"
-            + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
+            + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower()):
         # parsed.path.lower() converts to lowercase for case-insensitive matching
         # (so "file.PDF" matches same as "file.pdf")
+            return False
+    
+        #Trap Detection #1 for Infinite Loop Calendar Pages
+        if re.search(r"/(calendar|events?|archive)/", parsed.path.lower()):
+            return False
+        
+
+        # Trap #2: Date-based URL patterns (YYYY/MM/DD or YYYY-MM-DD)
+        if re.search(r"/\d{4}/\d{1,2}/\d{1,2}", parsed.path):
+            return False
+        if re.search(r"/\d{4}-\d{2}-\d{2}", parsed.path):
+            return False
+        
+        #Trap Detection #3 for Repeating Path Segements Loop
+        #If list length != unique set length, there are duplicates.
+        path_parts = [p for p in parsed.path.split('/') if p]
+        if len(path_parts) != len(set(path_parts)):
+            return False
+        
+
+        #Trap Detection #4 Excessive Path Depth
+        #Limit path depth to prevent crawling auto-generated directory structures
+        #and infinite folder hierarchies
+        if len(path_parts) > 15:
+            return False
+        
+
+        #Trap Detection #5 Very Long URLs
+        #URLs over 200 characters could indicate:
+        # Parameter manipulation traps, encoded attacks, or auto-generateed garbage URLs
+        if len(url) > 200:
+            return False
+        
+
+        #Trap Detection #6 Long Path Segments
+        #Rejecting URLs with segments > 80 chars avoids:
+        #Crawling thousands of auto-generated variations, wasting bandwith on dupliacte/low-value content,
+        #and getting suck in infinite calendar/event ID traps
+        #Example: http://ics.uci.edu/events/event-id-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2g3h4i5j6
+        for part in path_parts:
+            if len(part) > 80:
+                return False
+            
+        #Query Trap Detection
+        #Everything after the "?" in a URL
+        if parsed.query:
+            from urllib.parse import parse_qs
+            query_params = parse_qs(parsed.query)
+            
+            # TRAP #7A: Session IDs create infinite unique URLs for same page
+            # Example: ?sessionid=abc123 vs ?sessionid=xyz789 (same content!)
+            # Without this check, crawler gets stuck in infinite session loop
+            suspicious_params = [
+                'session',      # Generic session parameter
+                'sid',          # Session ID (shortened)
+                'jsessionid',   # Java session tracking
+                'phpsessid',    # PHP session tracking
+                'token',        # Authentication token
+                'auth',         # Authorization parameter
+                'timestamp',    # Time-based tracking
+                'replytocom'    # WordPress comment reply tracking
+            ]
+
+            for param in query_params.keys():
+                if any(susp in param.lower() for susp in suspicious_params):
+                    return False  # Reject: session ID detected
+            
+            # TRAP #7B: Too many query parameters indicate filter/sort traps
+            # Example: ?color=red&size=large&brand=nike&category=shoes&...
+            # Legitimate pages rarely have >8 parameters
+            if len(query_params) > 8:
+                return False  # Reject: too many parameters
+            
+            # TRAP #7C: Sorting/filtering params create duplicate content
+            # Example: ?sort=name vs ?sort=date (same page, different order)
+            # These don't add new information, waste crawl budget
+            duplicate_params = ['sort', 'order', 'view', 'filter', 'page', 'display']
+            if any(param in query_params for param in duplicate_params):
+                return False  # Reject: duplicate-generating parameter
+            
+
+        #Detection for Low-Information Pages
+        path_lower = parsed.path.lower()
+
+
+        #These are pages like login, signin, register, logout and contain
+        #form fields, security tokens, and no meaningful text for word frequency analysis
+        #Also, they're pages with no research content, no faculty info, no course material and 
+        #have no information value.
+        # Filter #1: Login/auth pages
+        if re.search(r'/(login|logout|signin|signout|register|auth)', path_lower):
+            return False
+        
+
+        # Filter #2: Duplicate versions (print/download/share)
+        # Many websites offer the same content in different formats like /article and /article/print
+        # These are duplicate content with different formatting so crawling wouldn't add new information
+
+        if re.search(r'/(download|print|share|export)', path_lower):
+            return False
+        
+        # Filter #3: APIs and feeds
+        # Pages like /api/data.json or /rss/feed.xml serve machine-readable structured data,
+        # not human-readable HTML. No <a> tags to extract, no narrative text for analysis.
+        # JSON/XML isn't useful for word frequency counting.
+        if re.search(r'/(api|json|xml|rss|feed|ajax)', path_lower):
+            return False
+        
+        # Filter #4: Admin areas
+        # Website administration pages like /wp-admin or /admin/dashboard contain control panels
+        # and system settings, not public-facing content. No academic information, often
+        # require login (dead-end), and don't represent actual site content.
+        if re.search(r'/(admin|wp-admin|wp-content|wp-includes)', path_lower):
+            return False
+        
+        # Filter #5: Shopping/account pages
+        # E-commerce pages like /cart or /checkout contain personalized, session-specific data.
+        # Create infinite URLs with session IDs, no academic content, transactional not informational.
+        if re.search(r'/(cart|checkout|account|profile)', path_lower):
+            return False
+        
+        # Filter #6: Gallery/attachment pages
+        # Photo galleries like /gallery/photo123 have minimal text (just "Photo 123" captions).
+        # Create pagination traps (/photo1, /photo2, ... /photo9999) with no meaningful content.
+        # Images don't contribute to word frequency - we want text-heavy academic pages.
+        if 'gallery' in path_lower or 'attachment' in path_lower:
+            return False
+        
+        # Filter #7: Action URLs
+        # URLs with ?action= are form submission endpoints (POST handlers, not content pages).
+        # Examples: ?action=delete, ?action=submit. Create infinite variations of same page,
+        # might trigger unintended server actions, usually return error/confirmation pages.
+        if parsed.query and 'action=' in parsed.query.lower():
+            return False
+
+        #A safeguard to make sure there are no fragments.
+        #A fragment is THE HASHTAG IN like http://ics.uc.edu/faculty#bio
+        #Pages with the same domain but extra fragments are the same page 
+        #That's why we remove them
+        if parsed.fragment:
+            return False
+        
+        #if all checks passed return True!
+        return True
 
     except TypeError:
         # Catch parsing errors and reject the URL safely.
