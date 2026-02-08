@@ -24,6 +24,8 @@
 #
 from bs4 import BeautifulSoup
 from urllib.parse import urldefrag, urlparse, urljoin
+from analytics import analytics
+
 import re
 from utils import get_logger
 
@@ -539,6 +541,10 @@ def scraper(url, resp):
             return links  # Early exit: dead 200, skip it
     except Exception:
         pass
+
+    #calling analytics.py 
+    final_url = getattr(resp.raw_response, "url", url)
+    analytics.add_page(final_url, tokens=tokens)
 
     # Update global word frequency statistics.
     # This accumulates term frequencies across all crawled pages.
