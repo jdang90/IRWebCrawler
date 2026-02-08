@@ -796,8 +796,8 @@ def is_valid(url: str):
 
             query_params = parse_qs(parsed.query)
 
-            # DokuWiki index/sitemap trap (e.g., doku.php?idx=policies)
-            if path_lower.endswith("doku.php") and "idx" in query_params:
+            # DokuWiki index/sitemap trap (e.g., /doku.php?idx=policies or /doku.php/...
+            if "doku.php" in path_lower and "idx" in query_params:
                 return False
             
             # TRAP: Session IDs, auth tokens, tracking params
