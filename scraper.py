@@ -796,6 +796,12 @@ def is_valid(url: str):
 
             query_params = parse_qs(parsed.query)
 
+            # Login/auth actions in query params (e.g., do=login)
+            if "do" in query_params:
+                do_values = [v.lower() for v in query_params.get("do", []) if isinstance(v, str)]
+                if any(v in {"login", "logout", "signin", "signout", "register"} for v in do_values):
+                    return False
+
             # DokuWiki traps: index/sitemap, action pages, media views, etc.
             if "doku.php" in path_lower:
                 # Any query on doku.php is almost always a duplicate or action view.
@@ -854,6 +860,11 @@ def is_valid(url: str):
         # Index/sitemap pages (often duplicate content or traps)
         if re.search(r'/(index|sitemap|page/\d+|default\.php)$', path_lower):
             return False
+
+        # GitLab commit/tree/history pages (avoid repo history traps)
+        if parsed.netloc.endswith("gitlab.ics.uci.edu"):
+            if re.search(r'/-/(commit|tree|commits|compare|blame)\b', path_lower):
+                return False
 
         # =========================================================================
         # RESTRICTION 6: Path Structure Validation
