@@ -578,6 +578,17 @@ def scraper(url, resp):
         longest_page = (url, len(tokens))
 
     # =========================================================================
+    # TRAP DETECTION #3: LINK-DENSITY HEURISTIC
+    # =========================================================================
+    # Skip link extraction on pages with unusually high link density.
+    link_count = len(soup.find_all("a", href=True))
+    word_count = len(tokens)
+    if word_count > 0:
+        link_density = link_count / word_count
+        if link_count > 100 and link_density > 0.5:
+            return links
+
+    # =========================================================================
     # STEP 4: EXTRACT AND FILTER OUTGOING LINKS
     # =========================================================================
     # Find all <a href="..."> tags and process their targets.
@@ -784,6 +795,10 @@ def is_valid(url: str):
                 return False
 
             query_params = parse_qs(parsed.query)
+
+            # DokuWiki index/sitemap trap (e.g., doku.php?idx=policies)
+            if path_lower.endswith("doku.php") and "idx" in query_params:
+                return False
             
             # TRAP: Session IDs, auth tokens, tracking params
             suspicious_params = [
