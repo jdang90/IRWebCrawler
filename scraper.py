@@ -796,8 +796,13 @@ def is_valid(url: str):
 
             query_params = parse_qs(parsed.query)
 
-            # DokuWiki index/sitemap trap (e.g., /doku.php?idx=policies or /doku.php/...
-            if "doku.php" in path_lower and "idx" in query_params:
+            # DokuWiki traps: index/sitemap, action pages, media views, etc.
+            if "doku.php" in path_lower:
+                # Any query on doku.php is almost always a duplicate or action view.
+                if query_params:
+                    return False
+                if "idx" in query_params:
+                    return False
                 return False
             
             # TRAP: Session IDs, auth tokens, tracking params
