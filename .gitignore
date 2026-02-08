@@ -112,3 +112,4 @@ venv.bak/
 #Test
 .localteest.py
 crawl_report.txt
+frontier.shelve.db
