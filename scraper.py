@@ -25,6 +25,10 @@
 from bs4 import BeautifulSoup
 from urllib.parse import urldefrag, urlparse, urljoin
 import re
+from utils import get_logger
+
+# Module-level logger for scraper
+logger = get_logger("SCRAPER")
 
 ###############################################################################
 # GLOBAL STORAGE (MVP - Minimum Viable Product)
@@ -445,6 +449,15 @@ def scraper(url, resp):
     links = []  # Accumulator for valid URLs from this page
 
     # =========================================================================
+    # EMERGENCY PRE-CHECK: Reject calendar or otherwise invalid URLs that
+    # slipped into the frontier before pre-download validation existed.
+    # This prevents processing pages that should never be downloaded.
+    # =========================================================================
+    if not is_valid(url):
+        logger.warning(f"[SCRAPER] Rejecting invalid URL that was already downloaded: {url}")
+        return []
+
+    # =========================================================================
     # STEP 1: VALIDATE RESPONSE - Ensure we have valid, processable HTML
     # =========================================================================
     
@@ -710,8 +723,12 @@ def is_valid(url: str):
         # Calendar/event pages create infinite URLs by date combinations.
         # Must catch: /events, /calendar, /ical, /outlook, ?ical=1, ?outlook-ical=1
         
-        path_lower = parsed.path.lower()
-        query_lower = (parsed.query or "").lower()
+        # Decode path and query to catch encoded calendar/export patterns
+        from urllib.parse import unquote
+        path_lower = unquote(parsed.path or "").lower()
+        query_lower = unquote((parsed.query or "")).lower()
+        # Also check full decoded URL for query-based traps
+        full_url_decoded = unquote(url).lower()
         
         # TRAP: Path contains calendar/event keywords (catches /events/tag/talks/2025-02)
         if re.search(r'/(calendar|events?|archive|tag/talks|ical|outlook|\.ics)', path_lower):
@@ -721,6 +738,10 @@ def is_valid(url: str):
         if 'ical' in query_lower or 'outlook' in query_lower or 'gcal' in query_lower:
             return False
         
+        # Also check full URL (defense in depth for encoded query strings)
+        if any(k in full_url_decoded for k in ['?ical=', '&ical=', 'outlook-ical']):
+            return False
+
         # TRAP: Date patterns in path (/2025/02 or /2025-02 or /talks/2025-02)
         if re.search(r'/\d{4}[-/]\d{1,2}', path_lower):
             return False

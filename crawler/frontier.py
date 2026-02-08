@@ -48,10 +48,20 @@ class Frontier(object):
             f"total urls discovered.")
 
     def get_tbd_url(self):
-        try:
-            return self.to_be_downloaded.pop()
-        except IndexError:
-            return None
+        # Pop URLs until we find a pre-validated one or the queue is empty.
+        while True:
+            try:
+                url = self.to_be_downloaded.pop()
+            except IndexError:
+                return None
+
+            # CRITICAL: Validate BEFORE downloading. Skip invalid URLs that
+            # may have been added to the save file before stricter checks existed.
+            if is_valid(url):
+                return url
+            else:
+                self.logger.info(f"Skipped invalid URL (pre-download): {url}")
+                continue
 
     def add_url(self, url):
         url = normalize(url)
