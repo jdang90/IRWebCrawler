@@ -830,6 +830,10 @@ def is_valid(url: str):
         # Gallery/attachment pages
         if 'gallery' in path_lower or 'attachment' in path_lower:
             return False
+        
+        # Index/sitemap pages (often duplicate content or traps)
+        if re.search(r'/(index|sitemap|page/\d+|default\.php)$', path_lower):
+            return False
 
         # =========================================================================
         # RESTRICTION 6: Path Structure Validation
